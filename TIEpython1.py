@@ -16,9 +16,11 @@
 
 #Part1 - Import plotting essentials and necessary numpy/scipy #
 
-from ij import IJ
+from ij import IJ, ImagePlus
 from ij.gui import Roi, GenericDialog
 from ij.io import OpenDialog
+from ij.process import FloatProcessor
+from ij import WindowManager as wm
 
 from ij.plugin import Stack_Statistics
 from ij.plugin.frame import RoiManager
@@ -27,6 +29,16 @@ from loci.plugins import BF
 
 import array
 import math
+
+def split_list(alist, wanted_parts=1):
+    """Split a list to the given number of parts."""
+    length = len(alist)
+    # alist[a:b:step] is used to get only a subsection of the list 'alist'.
+    # alist[a:b] is the same as [a:b:1].
+    # '//' is an integer division.
+    # Without 'from __future__ import division' '/' would be an integer division.
+    return [ alist[i*length // wanted_parts: (i+1)*length // wanted_parts]
+             for i in range(wanted_parts) ]
 
 #start_time = time.time()
 
@@ -64,7 +76,7 @@ BG_pixels = BG.getProcessor().getPixels()
 #Empiracally calculated from measured values so the derivative does not need to be calculated symbolically
 
 
-dI = array.array('d')
+dI = array.array('f')
 #print(len(Ia_pixels))
 for i in range(len(Ia_pixels)):
     dI.append((Ia_pixels[i] - Ib_pixels[i]) * k0 / dz)
@@ -93,14 +105,14 @@ Padsize = 1                                                                #Incr
 frequencyStepX = 2 * pi / (Dimx*Padsize)                                  #Sets up the size of each step in the Fourier domain X incorporating k
 frequencyStepY = 2 * pi / (Dimy*Padsize)                                  #Sets up the size of each step in the Fourier domain Y incorporating k
 
-wX = array.array('d')
+wX = array.array('f')
 wX.append(-pi + frequencyStepX)
 len_wX = 0
 while wX[len_wX] < pi + frequencyStepX:
     wX.append(wX[len_wX] + frequencyStepX)
     len_wX += 1
 
-wY = array.array('d')
+wY = array.array('f')
 wY.append(-pi + frequencyStepY)
 len_wY = 0
 while wY[len_wY] < pi + frequencyStepY:
@@ -110,7 +122,7 @@ while wY[len_wY] < pi + frequencyStepY:
 #print(len_wY)
 
 len_wR = len_wX * len_wY
-wR = array.array('d')
+wR = array.array('f')
 for i in range(len_wX):
     for j in range(len_wY):
         wR.append(math.sqrt(wX[i]**2 + wY[j]**2))
@@ -141,24 +153,41 @@ wR[wR <= pi/w0] = pi/(w0)
 hanning = wR
 for i in range(len_wX):
     for j in range(len_wY):
-        hanning[i * len_wX + j] = globaloffset * (1 + math.cos(hanning[i * len_wX + j] * pi / w0))
+        hanning[i * len_wY + j] = globaloffset * (1 + math.cos(hanning[i * len_wY + j] * pi / w0))
 
 #Transform dI/dz to the Fourier Domain, use zero padding to 2X dimensions
 #This takes dI from line 57 above and obtains the fourier transform, DI, from the three initial images
 
-'''
-DI = np.fft.fftshift(np.fft.fft2(dI,[Dimy*Padsize, Dimx*Padsize]))
-print("DI[0][0].type:", type(DI[0][0]))
-print("DI.shape:", DI.shape)
+#dI.show()
+#blank = IJ.createImage("Blank", "32-bit black", Dimy, Dimx, 1)
+
+#blank = IJ.openImage('/Users/guo/Desktop/TIE Code/TIE Code--Python/focus.tif')
+#blank_pixels = blank.getProcessor().getPixels()
+#blank_pixels1 = array.array("f")
+#for i in range(len(blank_pixels)):
+#    blank_pixels1.append(float(blank_pixels[i]))
+pixel_matrix = split_list(dI, wanted_parts = Dimy)
+#print(pixel_matrix)
+#pixel_matrix = [list(x) for x in zip(*pixel_matrix)]
+DI = ImagePlus("DI", FloatProcessor(pixel_matrix))
+# The input of FloatProcessor is limited to float and int. Short int is invalid.
+IJ.run(DI, "FFT", "")
+fft = wm.getImage("FFT of " + DI.getTitle())
+
+#DI = np.fft.fftshift(np.fft.fft2(dI,[Dimy*Padsize, Dimx*Padsize]))
+#print("DI[0][0].type:", type(DI[0][0]))
+#print("DI.shape:", DI.shape)
 
 #Define the Laplacian FD transform pair w/ Hanning bump or global offset
+'''
 TIEH = (1/ ((4*np.pi**2)*(ww**2+hanning)))               #Hanning bump Figure 2
 TIEGO = (1/ ((4*np.pi**2)*(ww**2+globaloffset)))         #Global offset as explained in Figure 2
 
 
 #compute the auxillary function, psi, as outlined in equation (2)
 PSIH = - DI * TIEH                                       #PSIH and PSIGO are the auxillary function in the fourier domain
-PSIGO = - DI * TIEGO                            
+PSIGO = - DI * TIEGO
+run("Inverse FFT")                            
 psiH = np.real(np.fft.ifft2(np.fft.ifftshift(PSIH)))     #Inverse of line 92, transforms the fourier form of the phase
 psiGo = np.real(np.fft.ifft2(np.fft.ifftshift(PSIGO)))   #PSIH or PSIGO into the spatial form psiH or psiGo
 
